@@ -1,0 +1,95 @@
+mkdir -p src/producer/dto
+cat > src/producer/dto/send-message.dto.ts << 'EOF'
+import { IsString, IsNotEmpty } from 'class-validator';
+
+export class SendMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  readonly message: string;
+}
+EOF
+
+# 5. Atualizar producer.service.ts
+cat > src/producer/producer.service.ts << 'EOF'
+import { Inject, Injectable } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
+import { SendMessageDto } from './dto/send-message.dto';
+
+@Injectable()
+export class ProducerService {
+  constructor(@Inject('RABBITMQ_SERVICE') private readonly client: ClientProxy) {}
+
+  async sendMessage(queue: string, payload: SendMessageDto) {
+    return this.client.emit(queue, payload);
+  }
+}
+EOF
+
+# 6. Atualizar producer.module.ts
+cat > src/producer/producer.module.ts << 'EOF'
+import { Module } from '@nestjs/common';
+import { ClientsModule, Transport } from '@nestjs/microservices';
+import { ProducerService } from './producer.service';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
+
+@Module({
+  imports: [
+    ClientsModule.register([
+      {
+        name: 'RABBITMQ_SERVICE',
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
+          queue: process.env.RABBITMQ_QUEUE || 'default_queue',
+          queueOptions: {
+            durable: true,
+          },
+        },
+      },
+    ]),
+  ],
+  providers: [ProducerService],
+  exports: [ProducerService],
+})
+export class ProducerModule {}
+EOF
+
+# 7. Atualizar app.module.ts
+cat > src/app.module.ts << 'EOF'
+import { Module } from '@nestjs/common';
+import { ProducerModule } from './producer/producer.module';
+import { AppController } from './app.controller';
+
+@Module({
+  imports: [ProducerModule],
+  controllers: [AppController],
+})
+export class AppModule {}
+EOF
+
+# 8. Criar app.controller.ts
+cat > src/app.controller.ts << 'EOF'
+import { Controller, Post, Body } from '@nestjs/common';
+import { ProducerService } from './producer/producer.service';
+import { SendMessageDto } from './producer/dto/send-message.dto';
+
+@Controller('messages')
+export class AppController {
+  constructor(private readonly producerService: ProducerService) {}
+
+  @Post()
+  sendMessage(@Body() body: SendMessageDto) {
+    return this.producerService.sendMessage('default_queue', body);
+  }
+}
+EOF
+
+# 9. Criar .env
+cat > .env << 'EOF'
+RABBITMQ_URL=amqp://localhost:5672
+RABBITMQ_QUEUE=default_queue
+EOF
+
+echo "✅ Projeto pronto! Execute com: npm run start"
